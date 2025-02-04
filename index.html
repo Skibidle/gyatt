@@ -14,19 +14,19 @@
         </div>
     </div>
 
-    <div id="startScreen">
+    <div id="startScreen" class="hidden">
         <h1>3D FPS Shooter</h1>
         <button id="startButton">Start Game</button>
     </div>
 
-    <div id="hud">
+    <div id="hud" class="hidden">
         <div id="score">Score: 0</div>
         <div id="health">Health: 100</div>
         <div id="ammo">Ammo: ∞</div>
         <div id="timer">Time: 0</div>
     </div>
 
-    <div id="crosshair"></div>
+    <div id="crosshair" class="hidden"></div>
 
     <div id="gameOver" class="hidden">
         <h2>Game Over!</h2>
@@ -35,9 +35,9 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three/examples/js/loaders/GLTFLoader.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three/examples/js/postprocessing/EffectComposer.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three/examples/js/postprocessing/RenderPass.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three/examples/js/postprocessing/GlitchPass.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three/examples/js/postprocessing/BloomPass.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three/examples/js/shaders/CopyShader.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three/examples/js/postprocessing/ShaderPass.js"></script>

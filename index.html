@@ -1,29 +1,46 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Browser FPS</title>
+    <title>Professional 3D FPS Shooter</title>
     <meta charset="UTF-8">
-    <style>
-        body { margin: 0; overflow: hidden; }
-        #score {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            color: white;
-            font-family: Arial;
-            font-size: 24px;
-        }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Add these elements -->
     <div id="loadingScreen">
-        <h2>Loading Assets...</h2>
+        <h1>Loading Assets...</h1>
+        <div class="progressBar">
+            <div class="progress"></div>
+        </div>
     </div>
 
-<div id="weaponHUD"></div>
-    <div id="score">Score: 0</div>
+    <div id="startScreen">
+        <h1>3D FPS Shooter</h1>
+        <button id="startButton">Start Game</button>
+    </div>
+
+    <div id="hud">
+        <div id="score">Score: 0</div>
+        <div id="health">Health: 100</div>
+        <div id="ammo">Ammo: ∞</div>
+        <div id="timer">Time: 0</div>
+    </div>
+
+    <div id="crosshair"></div>
+
+    <div id="gameOver" class="hidden">
+        <h2>Game Over!</h2>
+        <p>Final Score: <span id="finalScore">0</span></p>
+        <button onclick="location.reload()">Play Again</button>
+    </div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three/examples/js/postprocessing/GlitchPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three/examples/js/postprocessing/BloomPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three/examples/js/postprocessing/ShaderPass.js"></script>
     <script src="main.js"></script>
 </body>
 </html>

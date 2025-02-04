@@ -1,19 +1,10 @@
-// main.js
-let scene, camera, renderer;
-let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
-let score = 0, health = 100, gameTime = 0;
-let targets = [];
-let gameActive = false;
-let clock = new THREE.Clock();
+let scene, camera, renderer, composer, clock;
+let moveState = { forward: false, backward: false, left: false, right: false };
+let score = 0, health = 100, gameTime = 0, targets = [];
+let gameActive = false, audioListener, shootSound, hitSound, bgMusic;
+let particleSystem;
 
-// Audio
-const shootSound = new AudioContext();
-const hitSound = new AudioContext();
-
-init();
-animate();
-
-function init() {
+async function init() {
     // Scene setup
     scene = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -21,212 +12,164 @@ function init() {
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
+    // Post-processing
+    composer = new THREE.EffectComposer(renderer);
+    composer.addPass(new THREE.RenderPass(scene, camera));
+
+    const bloomPass = new THREE.BloomPass(1.5, 25, 5, 512);
+    composer.addPass(bloomPass);
+
+    const glitchPass = new THREE.GlitchPass();
+    glitchPass.goWild = false;
+    composer.addPass(glitchPass);
+
+    const copyPass = new THREE.ShaderPass(THREE.CopyShader);
+    copyPass.renderToScreen = true;
+    composer.addPass(copyPass);
+
+    // Load assets
+    await loadAssets();
+    setupGame();
+    animate();
+}
+
+async function loadAssets() {
+    const loader = new THREE.GLTFLoader();
+    const textureLoader = new THREE.TextureLoader();
+    const audioLoader = new THREE.AudioLoader();
+
+    // Load audio
+    audioListener = new THREE.AudioListener();
+    camera.add(audioListener);
+
+    shootSound = new THREE.Audio(audioListener);
+    hitSound = new THREE.Audio(audioListener);
+    bgMusic = new THREE.Audio(audioListener);
+
+    await Promise.all([
+        new Promise(resolve => audioLoader.load('sounds/shoot.wav', buffer => {
+            shootSound.setBuffer(buffer);
+            resolve();
+        })),
+        new Promise(resolve => audioLoader.load('sounds/hit.wav', buffer => {
+            hitSound.setBuffer(buffer);
+            resolve();
+        })),
+        new Promise(resolve => audioLoader.load('sounds/background.mp3', buffer => {
+            bgMusic.setBuffer(buffer);
+            bgMusic.setLoop(true);
+            bgMusic.setVolume(0.3);
+            resolve();
+        }))
+    ]);
+
+    // Load weapon model
+    const weapon = await new Promise(resolve => {
+        loader.load('models/weapon.glb', gltf => {
+            const model = gltf.scene;
+            model.position.set(0.5, -0.5, -1);
+            model.scale.set(0.1, 0.1, 0.1);
+            camera.add(model);
+            resolve(model);
+        });
+    });
+
+    // Load target model
+    const targetModel = await new Promise(resolve => {
+        loader.load('models/target.glb', gltf => {
+            resolve(gltf.scene);
+        });
+    });
+
+    window.targetModel = targetModel;
+
+    // Hide loading screen
+    document.getElementById('loadingScreen').classList.add('hidden');
+}
+
+function setupGame() {
     // Pointer Lock setup
     const startButton = document.getElementById('startButton');
-    startButton.addEventListener('click', () => {
-        document.body.requestPointerLock();
+    startButton.addEventListener('click', async () => {
+        await document.body.requestPointerLock();
         gameActive = true;
         document.getElementById('startScreen').classList.add('hidden');
+        bgMusic.play();
     });
 
     document.addEventListener('pointerlockchange', () => {
         if (document.pointerLockElement === document.body) {
             document.addEventListener('mousemove', onMouseMove, false);
         } else {
-            document.removeEventListener('mousemove', onMouseMove, false);
             gameActive = false;
+            bgMusic.stop();
             document.getElementById('gameOver').classList.remove('hidden');
         }
     });
 
-    // Camera position
+    // Scene setup
     camera.position.set(0, 1.6, 5);
+    setupLighting();
+    createEnvironment();
+    createTargets(8);
+    setupEventListeners();
+}
 
-    // Lighting
-    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+function setupLighting() {
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambientLight);
+
     const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    directionalLight.position.set(0, 10, 5);
+    directionalLight.position.set(5, 10, 5);
     scene.add(directionalLight);
 
+    const pointLight = new THREE.PointLight(0x00ff88, 1, 50);
+    pointLight.position.set(0, 10, 0);
+    scene.add(pointLight);
+}
+
+function createEnvironment() {
     // Floor
+    const floorTexture = new THREE.TextureLoader().load('textures/floor.jpg');
+    floorTexture.wrapS = THREE.RepeatWrapping;
+    floorTexture.wrapT = THREE.RepeatWrapping;
+    floorTexture.repeat.set(10, 10);
+
     const floor = new THREE.Mesh(
         new THREE.PlaneGeometry(100, 100),
-        new THREE.MeshPhongMaterial({ color: 0x808080 })
+        new THREE.MeshStandardMaterial({ map: floorTexture })
     );
     floor.rotation.x = -Math.PI / 2;
     scene.add(floor);
 
     // Walls
-    createWalls();
-
-    // Create initial targets
-    createTargets(5);
-
-    // Event listeners
-    document.addEventListener('keydown', onKeyDown);
-    document.addEventListener('keyup', onKeyUp);
-    document.addEventListener('mousedown', shoot);
-}
-
-function createWalls() {
-    const wallMaterial = new THREE.MeshPhongMaterial({ color: 0x606060 });
+    const wallTexture = new THREE.TextureLoader().load('textures/wall.jpg');
     const walls = [
-        new THREE.Mesh(new THREE.BoxGeometry(100, 10, 1), wallMaterial), // back
-        new THREE.Mesh(new THREE.BoxGeometry(1, 10, 100), wallMaterial), // left
-        new THREE.Mesh(new THREE.BoxGeometry(1, 10, 100), wallMaterial), // right
+        new THREE.Mesh(new THREE.BoxGeometry(100, 10, 2), new THREE.MeshStandardMaterial({ map: wallTexture })),
+        new THREE.Mesh(new THREE.BoxGeometry(2, 10, 100), new THREE.MeshStandardMaterial({ map: wallTexture })),
+        new THREE.Mesh(new THREE.BoxGeometry(2, 10, 100), new THREE.MeshStandardMaterial({ map: wallTexture }))
     ];
 
     walls[0].position.z = -50;
     walls[1].position.x = -50;
     walls[2].position.x = 50;
-
     walls.forEach(wall => {
         wall.position.y = 5;
         scene.add(wall);
     });
 }
 
-function createTargets(count) {
-    const targetGeometry = new THREE.BoxGeometry(1, 2, 0.1);
-    const targetMaterial = new THREE.MeshPhongMaterial({ color: 0xff0000 });
-    
-    for (let i = 0; i < count; i++) {
-        const target = new THREE.Mesh(targetGeometry, targetMaterial);
-        resetTargetPosition(target);
-        scene.add(target);
-        targets.push(target);
-    }
-}
-
-function resetTargetPosition(target) {
-    target.position.set(
-        (Math.random() - 0.5) * 40,
-        1,
-        -Math.random() * 40 - 5
-    );
-    target.speed = Math.random() * 0.02 + 0.01;
-}
-
-function onMouseMove(event) {
-    if (gameActive) {
-        camera.rotation.y -= event.movementX * 0.002;
-        camera.rotation.x -= event.movementY * 0.002;
-        camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x));
-    }
-}
-
-function onKeyDown(event) {
-    if (!gameActive) return;
-    
-    switch (event.key.toLowerCase()) {
-        case 'w': moveForward = true; break;
-        case 's': moveBackward = true; break;
-        case 'a': moveLeft = true; break;
-        case 'd': moveRight = true; break;
-    }
-}
-
-function onKeyUp(event) {
-    switch (event.key.toLowerCase()) {
-        case 'w': moveForward = false; break;
-        case 's': moveBackward = false; break;
-        case 'a': moveLeft = false; break;
-        case 'd': moveRight = false; break;
-    }
-}
-
-function shoot() {
-    if (!gameActive) return;
-    
-    // Play shoot sound
-    const oscillator = shootSound.createOscillator();
-    const gainNode = shootSound.createGain();
-    oscillator.connect(gainNode);
-    gainNode.connect(shootSound.destination);
-    oscillator.frequency.value = 1000;
-    gainNode.gain.value = 0.1;
-    oscillator.start();
-    oscillator.stop(shootSound.currentTime + 0.1);
-
-    const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera(new THREE.Vector2(), camera);
-    
-    const intersects = raycaster.intersectObjects(targets);
-    if (intersects.length > 0) {
-        const target = intersects[0].object;
-        scene.remove(target);
-        targets.splice(targets.indexOf(target), 1);
-        score += 10;
-        document.getElementById('score').textContent = `Score: ${score}`;
-        
-        // Create new target
-        const newTarget = new THREE.Mesh(target.geometry, target.material);
-        resetTargetPosition(newTarget);
-        scene.add(newTarget);
-        targets.push(newTarget);
-
-        // Play hit sound
-        const hitOscillator = hitSound.createOscillator();
-        const hitGain = hitSound.createGain();
-        hitOscillator.connect(hitGain);
-        hitGain.connect(hitSound.destination);
-        hitOscillator.frequency.value = 500;
-        hitGain.gain.value = 0.1;
-        hitOscillator.start();
-        hitOscillator.stop(hitSound.currentTime + 0.1);
-    }
-}
-
-function updateMovement() {
-    const delta = clock.getDelta();
-    const speed = 5 * delta;
-    const direction = new THREE.Vector3();
-
-    if (moveForward) direction.z -= speed;
-    if (moveBackward) direction.z += speed;
-    if (moveLeft) direction.x -= speed;
-    if (moveRight) direction.x += speed;
-
-    direction.applyEuler(new THREE.Euler(0, camera.rotation.y, 0));
-    camera.position.add(direction);
-
-    // Target movement
-    targets.forEach(target => {
-        target.position.x += target.speed;
-        if (target.position.x > 20 || target.position.x < -20) {
-            target.speed *= -1;
-        }
-
-        // Check collision with player
-        const distance = camera.position.distanceTo(target.position);
-        if (distance < 2) {
-            health = Math.max(0, health - 1);
-            document.getElementById('health').textContent = `Health: ${health}`;
-            if (health <= 0) {
-                gameActive = false;
-                document.exitPointerLock();
-                document.getElementById('finalScore').textContent = score;
-                document.getElementById('gameOver').classList.remove('hidden');
-            }
-        }
-    });
-}
-
 function animate() {
     requestAnimationFrame(animate);
-    
     if (gameActive) {
-        gameTime += clock.getDelta();
+        const delta = clock.getDelta();
+        gameTime += delta;
         document.getElementById('timer').textContent = `Time: ${Math.floor(gameTime)}`;
-        updateMovement();
+        handleInput();
+        updateTargets();
     }
-    
-    renderer.render(scene, camera);
+    composer.render();
 }
 
-// Handle window resize
-window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-});
+// Initialize the game
+init();

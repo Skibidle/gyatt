@@ -5,6 +5,10 @@ let gameActive = false, audioListener, shootSound, hitSound, bgMusic;
 let particleSystem, weaponModel, screenShakeIntensity = 0;
 let mixer, recoilAction;
 
+// Asset loading progress
+let assetsLoaded = 0;
+const totalAssets = 6; // Update this based on your assets
+
 async function init() {
     // Scene setup
     scene = new THREE.Scene();
@@ -53,47 +57,70 @@ async function loadAssets() {
     bgMusic = new THREE.Audio(audioListener);
 
     await Promise.all([
-        new Promise(resolve => audioLoader.load('sounds/shoot.wav', buffer => {
-            shootSound.setBuffer(buffer);
-            resolve();
-        })),
-        new Promise(resolve => audioLoader.load('sounds/hit.wav', buffer => {
-            hitSound.setBuffer(buffer);
-            resolve();
-        })),
-        new Promise(resolve => audioLoader.load('sounds/background.mp3', buffer => {
-            bgMusic.setBuffer(buffer);
-            bgMusic.setLoop(true);
-            bgMusic.setVolume(0.3);
-            resolve();
-        }))
+        loadAudio('sounds/shoot.wav', shootSound),
+        loadAudio('sounds/hit.wav', hitSound),
+        loadAudio('sounds/background.mp3', bgMusic),
+        loadTexture('textures/floor.jpeg'),
+        loadTexture('textures/wall.jpeg'),
+        loadModel('models/weapon.glb'),
+        loadModel('models/target.glb')
     ]);
 
-    // Load weapon model with animations
-    const weaponGLB = await new Promise(resolve => {
-        loader.load('models/weapon.glb', gltf => {
-            weaponModel = gltf.scene;
-            weaponModel.position.set(0.5, -0.5, -1);
-            weaponModel.scale.set(0.1, 0.1, 0.1);
-            camera.add(weaponModel);
+    // Hide loading screen and show start screen
+    document.getElementById('loadingScreen').classList.add('hidden');
+    document.getElementById('startScreen').classList.remove('hidden');
+}
 
-            mixer = new THREE.AnimationMixer(weaponModel);
-            recoilAction = mixer.clipAction(gltf.animations[0]);
+async function loadAudio(url, audio) {
+    return new Promise(resolve => {
+        const audioLoader = new THREE.AudioLoader();
+        audioLoader.load(url, buffer => {
+            audio.setBuffer(buffer);
+            if (url.includes('background')) {
+                audio.setLoop(true);
+                audio.setVolume(0.3);
+            }
+            updateProgress();
             resolve();
         });
     });
+}
 
-    // Load target model
-    const targetModel = await new Promise(resolve => {
-        loader.load('models/target.glb', gltf => {
-            resolve(gltf.scene);
+async function loadTexture(url) {
+    return new Promise(resolve => {
+        const textureLoader = new THREE.TextureLoader();
+        textureLoader.load(url, texture => {
+            updateProgress();
+            resolve(texture);
         });
     });
+}
 
-    window.targetModel = targetModel;
+async function loadModel(url) {
+    return new Promise(resolve => {
+        const loader = new THREE.GLTFLoader();
+        loader.load(url, gltf => {
+            if (url.includes('weapon')) {
+                weaponModel = gltf.scene;
+                weaponModel.position.set(0.5, -0.5, -1);
+                weaponModel.scale.set(0.1, 0.1, 0.1);
+                camera.add(weaponModel);
 
-    // Hide loading screen
-    document.getElementById('loadingScreen').classList.add('hidden');
+                mixer = new THREE.AnimationMixer(weaponModel);
+                recoilAction = mixer.clipAction(gltf.animations[0]);
+            } else if (url.includes('target')) {
+                window.targetModel = gltf.scene;
+            }
+            updateProgress();
+            resolve(gltf);
+        });
+    });
+}
+
+function updateProgress() {
+    assetsLoaded++;
+    const progress = (assetsLoaded / totalAssets) * 100;
+    document.querySelector('.progress').style.width = `${progress}%`;
 }
 
 function setupGame() {
@@ -103,6 +130,8 @@ function setupGame() {
         await document.body.requestPointerLock();
         gameActive = true;
         document.getElementById('startScreen').classList.add('hidden');
+        document.getElementById('hud').classList.remove('hidden');
+        document.getElementById('crosshair').classList.remove('hidden');
         bgMusic.play();
     });
 
@@ -113,6 +142,8 @@ function setupGame() {
             gameActive = false;
             bgMusic.stop();
             document.getElementById('gameOver').classList.remove('hidden');
+            document.getElementById('hud').classList.add('hidden');
+            document.getElementById('crosshair').classList.add('hidden');
         }
     });
 
@@ -241,6 +272,87 @@ function updateParticles(delta) {
         }
     }
     particleSystem.geometry.attributes.position.needsUpdate = true;
+}
+
+function handleInput() {
+    const delta = clock.getDelta();
+    const speed = 5 * delta;
+    const direction = new THREE.Vector3();
+
+    if (moveState.forward) direction.z -= speed;
+    if (moveState.backward) direction.z += speed;
+    if (moveState.left) direction.x -= speed;
+    if (moveState.right) direction.x += speed;
+
+    direction.applyEuler(new THREE.Euler(0, camera.rotation.y, 0));
+    camera.position.add(direction);
+}
+
+function onMouseMove(event) {
+    if (gameActive) {
+        camera.rotation.y -= event.movementX * 0.002;
+        camera.rotation.x -= event.movementY * 0.002;
+        camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x));
+    }
+}
+
+function shoot() {
+    if (!gameActive) return;
+
+    shootSound.play();
+    screenShakeIntensity = 0.5;
+    if (recoilAction) recoilAction.play();
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2(), camera);
+
+    const intersects = raycaster.intersectObjects(targets, true);
+    if (intersects.length > 0) {
+        const target = intersects[0].object.parent;
+        target.health--;
+
+        if (target.health <= 0) {
+            scene.remove(target);
+            targets.splice(targets.indexOf(target), 1);
+            createTargets(1);
+            score += 100;
+        } else {
+            hitSound.play();
+            score += 25;
+        }
+
+        document.getElementById('score').textContent = `Score: ${score}`;
+    }
+}
+
+function setupEventListeners() {
+    document.addEventListener('keydown', e => {
+        switch (e.key.toLowerCase()) {
+            case 'w': moveState.forward = true; break;
+            case 's': moveState.backward = true; break;
+            case 'a': moveState.left = true; break;
+            case 'd': moveState.right = true; break;
+        }
+    });
+
+    document.addEventListener('keyup', e => {
+        switch (e.key.toLowerCase()) {
+            case 'w': moveState.forward = false; break;
+            case 's': moveState.backward = false; break;
+            case 'a': moveState.left = false; break;
+            case 'd': moveState.right = false; break;
+        }
+    });
+
+    document.addEventListener('mousedown', shoot);
+    window.addEventListener('resize', onWindowResize);
+}
+
+function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    composer.setSize(window.innerWidth, window.innerHeight);
 }
 
 // Initialize the game

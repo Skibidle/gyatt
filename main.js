@@ -3,6 +3,7 @@ let moveState = { forward: false, backward: false, left: false, right: false };
 let score = 0, health = 100, gameTime = 0, targets = [];
 let gameActive = false, audioListener, shootSound, hitSound, bgMusic;
 let particleSystem, weaponModel, screenShakeIntensity = 0;
+let mixer, recoilAction;
 
 async function init() {
     // Scene setup
@@ -12,6 +13,9 @@ async function init() {
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.5;
     document.body.appendChild(renderer.domElement);
 
     // Post-processing
@@ -21,9 +25,9 @@ async function init() {
     const bloomPass = new THREE.BloomPass(1.5, 25, 5, 512);
     composer.addPass(bloomPass);
 
-    const glitchPass = new THREE.GlitchPass();
-    glitchPass.goWild = false;
-    composer.addPass(glitchPass);
+    const fxaaPass = new THREE.ShaderPass(THREE.FXAAShader);
+    fxaaPass.uniforms['resolution'].value.set(1 / window.innerWidth, 1 / window.innerHeight);
+    composer.addPass(fxaaPass);
 
     const copyPass = new THREE.ShaderPass(THREE.CopyShader);
     copyPass.renderToScreen = true;
@@ -65,14 +69,17 @@ async function loadAssets() {
         }))
     ]);
 
-    // Load weapon model
-    weaponModel = await new Promise(resolve => {
+    // Load weapon model with animations
+    const weaponGLB = await new Promise(resolve => {
         loader.load('models/weapon.glb', gltf => {
-            const model = gltf.scene;
-            model.position.set(0.5, -0.5, -1);
-            model.scale.set(0.1, 0.1, 0.1);
-            camera.add(model);
-            resolve(model);
+            weaponModel = gltf.scene;
+            weaponModel.position.set(0.5, -0.5, -1);
+            weaponModel.scale.set(0.1, 0.1, 0.1);
+            camera.add(weaponModel);
+
+            mixer = new THREE.AnimationMixer(weaponModel);
+            recoilAction = mixer.clipAction(gltf.animations[0]);
+            resolve();
         });
     });
 
@@ -125,8 +132,8 @@ function setupLighting() {
     const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
     directionalLight.position.set(5, 10, 5);
     directionalLight.castShadow = true;
-    directionalLight.shadow.mapSize.width = 1024;
-    directionalLight.shadow.mapSize.height = 1024;
+    directionalLight.shadow.mapSize.width = 2048;
+    directionalLight.shadow.mapSize.height = 2048;
     directionalLight.shadow.camera.near = 0.5;
     directionalLight.shadow.camera.far = 50;
     scene.add(directionalLight);
@@ -146,7 +153,7 @@ function createEnvironment() {
 
     const floor = new THREE.Mesh(
         new THREE.PlaneGeometry(100, 100),
-        new THREE.MeshStandardMaterial({ map: floorTexture })
+        new THREE.MeshStandardMaterial({ map: floorTexture, roughness: 0.8, metalness: 0.2 })
     );
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
@@ -155,9 +162,9 @@ function createEnvironment() {
     // Walls
     const wallTexture = new THREE.TextureLoader().load('textures/wall.jpeg');
     const walls = [
-        new THREE.Mesh(new THREE.BoxGeometry(100, 10, 2), new THREE.MeshStandardMaterial({ map: wallTexture })),
-        new THREE.Mesh(new THREE.BoxGeometry(2, 10, 100), new THREE.MeshStandardMaterial({ map: wallTexture })),
-        new THREE.Mesh(new THREE.BoxGeometry(2, 10, 100), new THREE.MeshStandardMaterial({ map: wallTexture }))
+        new THREE.Mesh(new THREE.BoxGeometry(100, 10, 2), new THREE.MeshStandardMaterial({ map: wallTexture, roughness: 0.7, metalness: 0.3 })),
+        new THREE.Mesh(new THREE.BoxGeometry(2, 10, 100), new THREE.MeshStandardMaterial({ map: wallTexture, roughness: 0.7, metalness: 0.3 })),
+        new THREE.Mesh(new THREE.BoxGeometry(2, 10, 100), new THREE.MeshStandardMaterial({ map: wallTexture, roughness: 0.7, metalness: 0.3 }))
     ];
 
     walls[0].position.z = -50;
@@ -203,14 +210,16 @@ function setupParticles() {
 
 function animate() {
     requestAnimationFrame(animate);
+    const delta = clock.getDelta();
+
     if (gameActive) {
-        const delta = clock.getDelta();
         gameTime += delta;
         document.getElementById('timer').textContent = `Time: ${Math.floor(gameTime)}`;
         handleInput();
         updateTargets();
         updateScreenShake(delta);
         updateParticles(delta);
+        if (mixer) mixer.update(delta);
     }
     composer.render();
 }
